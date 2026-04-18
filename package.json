@@ -1,0 +1,26 @@
+{
+  "name": "safe-env-guard",
+  "version": "0.1.0",
+  "description": "A zero-dependency utility to validate and guard environment variables at runtime.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.js"
+  },
+  "keywords": [
+    "env",
+    "environment",
+    "validation",
+    "guard",
+    "dotenv"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}
