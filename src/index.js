@@ -6,14 +6,32 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
+// ─── ANSI styling ────────────────────────────────────────────────────────────
+
+const A = {
+  reset:       '\x1b[0m',
+  bold:        '\x1b[1m',
+  dim:         '\x1b[2m',
+  red:         '\x1b[31m',
+  yellow:      '\x1b[33m',
+  cyan:        '\x1b[36m',
+  brightRed:   '\x1b[91m',
+  brightWhite: '\x1b[97m',
+};
+
+const boldRed       = A.bold + A.red;
+const boldBrightRed = A.bold + A.brightRed;
+const boldWhite     = A.bold + A.brightWhite;
+const boldYellow    = A.bold + A.yellow;
+const R             = A.reset;
+
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
  * Reads an env file from disk and returns its raw content.
- * Returns an empty string when the file does not exist, so callers can
- * treat a missing .env the same as an empty one without crashing.
+ * Returns an empty string when the file does not exist.
  *
- * @param {string} filePath  Absolute path to the file.
+ * @param {string} filePath
  * @returns {string}
  */
 function readEnvFile(filePath) {
@@ -35,7 +53,7 @@ function readEnvFile(filePath) {
  *  - Inline `#` comments after the value are stripped.
  *  - Surrounding single or double quotes on values are removed.
  *
- * @param {string} content  Raw file content.
+ * @param {string} content
  * @returns {Map<string, string>}
  */
 function parseEnvContent(content) {
@@ -52,15 +70,11 @@ function parseEnvContent(content) {
     const key = line.slice(0, eqIndex).trim();
     if (key === '') continue;
 
-    // Strip inline comment, then trim whitespace from value.
     let value = line.slice(eqIndex + 1);
     const commentIndex = value.indexOf(' #');
-    if (commentIndex !== -1) {
-      value = value.slice(0, commentIndex);
-    }
+    if (commentIndex !== -1) value = value.slice(0, commentIndex);
     value = value.trim();
 
-    // Remove surrounding quotes.
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
@@ -74,46 +88,113 @@ function parseEnvContent(content) {
   return map;
 }
 
+/**
+ * Builds the styled ANSI error report string for missing environment variables.
+ *
+ * The box header is exactly 53 visible characters wide:
+ *   " ✖  safe-env-guard  ·  Environment Validation Failed "
+ *   4 + 14 + 5 + 30 = 53
+ *
+ * @param {string[]} missingKeys
+ * @returns {string}
+ */
+export function buildErrorReport(missingKeys) {
+  // ── Box geometry ──────────────────────────────────────────────────────────
+  //
+  // Visible header text (53 chars):
+  //   " ✖  safe-env-guard  ·  Environment Validation Failed "
+  //    ^^^^  ^^^^^^^^^^^^^^  ^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  //    4 ch  14 ch          5ch  30 ch
+  //
+  const BOX_INNER    = 53;
+  const innerBorder  = '═'.repeat(BOX_INNER);
+  const divider      = '─'.repeat(BOX_INNER);
+
+  const topRow    = `${boldRed}╔${innerBorder}╗${R}`;
+  const bottomRow = `${boldRed}╚${innerBorder}╝${R}`;
+
+  // Header content — exactly 53 visible chars
+  const headerContent =
+    `${boldBrightRed} ✖  ${R}` +            //  4 visible:  " ✖  "
+    `${boldWhite}safe-env-guard${R}` +       // 14 visible:  "safe-env-guard"
+    `  ${A.dim}·${R}  ` +                   //  5 visible:  "  ·  "
+    `${boldYellow}Environment Validation Failed ${R}`; // 30 visible
+
+  const headerRow = `${boldRed}║${R}${headerContent}${boldRed}║${R}`;
+
+  // ── Body ──────────────────────────────────────────────────────────────────
+
+  const count = missingKeys.length;
+  const plural = count === 1 ? 'variable' : 'variables';
+
+  const summary =
+    `  ${A.dim}${count} ${plural} declared in ${R}` +
+    `${boldWhite}.env.example${R}` +
+    `${A.dim} are missing or empty in ${R}` +
+    `${boldWhite}.env${R}${A.dim}:${R}`;
+
+  const keyLines = missingKeys
+    .map(key => `    ${boldBrightRed}✖  ${key}${R}`)
+    .join('\n');
+
+  const hint =
+    `  ${A.dim}Copy ${R}${A.cyan}.env.example${R}` +
+    `${A.dim} → ${R}${A.cyan}.env${R}` +
+    `${A.dim} and fill in the missing values, then restart.${R}`;
+
+  // ── Assemble ──────────────────────────────────────────────────────────────
+
+  return [
+    '',
+    topRow,
+    headerRow,
+    bottomRow,
+    '',
+    summary,
+    '',
+    keyLines,
+    '',
+    hint,
+    '',
+    `  ${A.dim}${divider}${R}`,
+    '',
+  ].join('\n');
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Synchronously reads `.env` and `.env.example` from the given directory,
- * then returns the list of keys that are declared in `.env.example` but are
- * either absent from `.env` or present with an empty value.
+ * Synchronously reads `.env` and `.env.example` from the given directory.
+ * If any keys declared in `.env.example` are missing or empty in `.env`,
+ * a styled error is printed to stderr and the process exits with code 1.
+ * Returns normally (with no value) when all keys are present.
  *
  * @param {string} [dir=process.cwd()]
- *   The directory that contains both env files.
- *   Defaults to the current working directory so the function works
- *   correctly when called from a project's root.
- * @returns {string[]}  Array of missing/empty key names (may be empty).
+ *   Directory that contains the env files.
+ * @param {{ _exit?: (code: number) => never }} [opts]
+ *   Internal escape hatch — pass `_exit` to override `process.exit` in tests.
  *
  * @example
  * import { validateEnv } from 'safe-env-guard';
- *
- * const missing = validateEnv();
- * if (missing.length > 0) {
- *   console.error('Missing env vars:', missing);
- *   process.exit(1);
- * }
+ * validateEnv(); // exits loudly if anything is missing
  */
-export function validateEnv(dir = process.cwd()) {
-  const examplePath = resolve(dir, '.env.example');
-  const envPath = resolve(dir, '.env');
-
-  const exampleMap = parseEnvContent(readEnvFile(examplePath));
-  const envMap = parseEnvContent(readEnvFile(envPath));
+export function validateEnv(dir = process.cwd(), { _exit = process.exit } = {}) {
+  const exampleMap = parseEnvContent(readEnvFile(resolve(dir, '.env.example')));
+  const envMap     = parseEnvContent(readEnvFile(resolve(dir, '.env')));
 
   const missing = [];
 
   for (const key of exampleMap.keys()) {
     const value = envMap.get(key);
-    // Missing entirely OR present but empty.
     if (value === undefined || value === '') {
       missing.push(key);
     }
   }
 
-  return missing;
+  if (missing.length > 0) {
+    process.stderr.write(buildErrorReport(missing) + '\n');
+    _exit(1);
+  }
 }
 
 /**
