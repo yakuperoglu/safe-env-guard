@@ -3,7 +3,7 @@
  * A zero-dependency utility to validate and guard environment variables at runtime.
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 
 // ─── ANSI styling ────────────────────────────────────────────────────────────
@@ -89,6 +89,18 @@ function parseEnvContent(content) {
 }
 
 /**
+ * Sanitizes environment key names before printing to the terminal.
+ * Removes control characters (including ESC) to avoid terminal injection.
+ *
+ * @param {string} key
+ * @returns {string}
+ */
+function sanitizeKeyForDisplay(key) {
+  const cleaned = key.replace(/[\x00-\x1F\x7F]/g, '?');
+  return cleaned === '' ? '<invalid-key>' : cleaned;
+}
+
+/**
  * Builds the styled ANSI error report string for missing environment variables.
  *
  * The box header is exactly 53 visible characters wide:
@@ -171,16 +183,33 @@ export function buildErrorReport(missingKeys) {
  *
  * @param {string} [dir=process.cwd()]
  *   Directory that contains the env files.
- * @param {{ _exit?: (code: number) => never }} [opts]
+ * @param {{ strictExample?: boolean; _exit?: (code: number) => never }} [opts]
  *   Internal escape hatch — pass `_exit` to override `process.exit` in tests.
  *
  * @example
  * import { validateEnv } from 'safe-env-guard';
  * validateEnv(); // exits loudly if anything is missing
  */
-export function validateEnv(dir = process.cwd(), { _exit = process.exit } = {}) {
-  const exampleMap = parseEnvContent(readEnvFile(resolve(dir, '.env.example')));
-  const envMap     = parseEnvContent(readEnvFile(resolve(dir, '.env')));
+export function validateEnv(
+  dir = process.cwd(),
+  { strictExample = false, _exit = process.exit } = {},
+) {
+  const examplePath = resolve(dir, '.env.example');
+  const envPath = resolve(dir, '.env');
+  const hasExampleFile = existsSync(examplePath);
+
+  if (!hasExampleFile && strictExample) {
+    process.stderr.write(
+      '\n' +
+      `${boldBrightRed}✖${R} ${boldWhite}safe-env-guard${R} ` +
+      `${A.dim}strict mode: missing ${R}${boldWhite}.env.example${R}\n\n`,
+    );
+    _exit(1);
+    return;
+  }
+
+  const exampleMap = parseEnvContent(readEnvFile(examplePath));
+  const envMap = parseEnvContent(readEnvFile(envPath));
 
   const missing = [];
 
@@ -192,7 +221,7 @@ export function validateEnv(dir = process.cwd(), { _exit = process.exit } = {}) 
   }
 
   if (missing.length > 0) {
-    process.stderr.write(buildErrorReport(missing) + '\n');
+    process.stderr.write(buildErrorReport(missing.map(sanitizeKeyForDisplay)) + '\n');
     _exit(1);
   }
 }

@@ -40,7 +40,7 @@ function makeTempDir(example, env) {
  * Runs validateEnv() and returns { exitCode, missingKeys } without killing
  * the process. Captures stderr to extract which keys were reported missing.
  */
-function runValidate(dir) {
+function runValidate(dir, opts = {}) {
   let exitCode = null;
   const stderrChunks = [];
 
@@ -49,6 +49,7 @@ function runValidate(dir) {
 
   try {
     validateEnv(dir, {
+      ...opts,
       _exit: (code) => { exitCode = code; },
     });
   } finally {
@@ -63,7 +64,7 @@ function runValidate(dir) {
   const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
   const missingKeys = [...plain.matchAll(/^ {4}✖ {2}(\S+)/gm)].map(m => m[1]);
 
-  return { exitCode, missingKeys };
+  return { exitCode, missingKeys, output };
 }
 
 // ── validateEnv() tests ──────────────────────────────────────────────────────
@@ -142,11 +143,29 @@ console.log('\nvalidateEnv()');
   rmSync(dir, { recursive: true });
 }
 
+// 8. Missing .env.example with strict mode enabled → exits(1)
+{
+  const dir = mkdtempSync(join(tmpdir(), 'safe-env-guard-'));
+  writeFileSync(join(dir, '.env'), 'KEY=value\n', 'utf8');
+  const { exitCode } = runValidate(dir, { strictExample: true });
+  assert('exits when .env.example is missing in strict mode', exitCode, 1);
+  rmSync(dir, { recursive: true });
+}
+
+// 9. Keys are sanitized before rendering in terminal error output
+{
+  const dir = makeTempDir('SAFE_KEY=\nBAD\x1b[31mKEY=\n', '');
+  const { output } = runValidate(dir);
+  assert('removes raw escape characters from key output', output.includes('BAD\x1b[31mKEY'), false);
+  assert('prints sanitized key text in output', output.includes('BAD?[31mKEY'), true);
+  rmSync(dir, { recursive: true });
+}
+
 // ── buildErrorReport() tests ─────────────────────────────────────────────────
 
 console.log('\nbuildErrorReport()');
 
-// 8. Report contains every missing key in plain text
+// 10. Report contains every missing key in plain text
 {
   const report = buildErrorReport(['SECRET_KEY', 'DB_URL', 'API_TOKEN']);
   const plain  = report.replace(/\x1b\[[0-9;]*m/g, '');
@@ -154,21 +173,21 @@ console.log('\nbuildErrorReport()');
   assert('contains all missing keys in the output', found, ['SECRET_KEY', 'DB_URL', 'API_TOKEN']);
 }
 
-// 9. Report contains singular "variable" for one key
+// 11. Report contains singular "variable" for one key
 {
   const report = buildErrorReport(['ONLY_ONE']);
   const plain  = report.replace(/\x1b\[[0-9;]*m/g, '');
   assert('uses singular "variable" for one missing key', plain.includes('1 variable '), true);
 }
 
-// 10. Report contains plural "variables" for multiple keys
+// 12. Report contains plural "variables" for multiple keys
 {
   const report = buildErrorReport(['A', 'B']);
   const plain  = report.replace(/\x1b\[[0-9;]*m/g, '');
   assert('uses plural "variables" for multiple missing keys', plain.includes('2 variables '), true);
 }
 
-// 11. Report contains ANSI escape codes (is actually coloured)
+// 13. Report contains ANSI escape codes (is actually coloured)
 {
   const report = buildErrorReport(['KEY']);
   assert('output contains ANSI escape codes', report.includes('\x1b['), true);

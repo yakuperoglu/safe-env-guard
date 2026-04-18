@@ -1,26 +1,45 @@
 {
   "name": "safe-env-guard",
-  "version": "0.1.0",
-  "description": "A zero-dependency utility to validate and guard environment variables at runtime.",
+  "version": "1.0.0",
+  "description": "A zero-dependency utility that validates .env against .env.example and prevents your app from starting with missing environment variables.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".":      "./src/index.js",
+    "./init": "./src/init.js"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node --test tests/**/*.test.js"
+    "test": "node tests/validateEnv.smoke.js",
+    "demo:ok": "node examples/local-try/ok.js",
+    "demo:missing": "node examples/local-try/missing.js",
+    "demo:strict": "node examples/local-try/strict.js"
   },
   "keywords": [
     "env",
     "environment",
+    "dotenv",
     "validation",
     "guard",
-    "dotenv"
+    "startup",
+    "zero-dependency",
+    "esm"
   ],
-  "author": "",
+  "author": "Yakup Eroğlu",
   "license": "MIT",
-  "dependencies": {}
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yakuperoglu/safe-env-guard.git"
+  },
+  "homepage": "https://github.com/yakuperoglu/safe-env-guard#readme",
+  "bugs": {
+    "url": "https://github.com/yakuperoglu/safe-env-guard/issues"
+  }
 }
